@@ -1,0 +1,89 @@
+version: '3.9'
+
+services:
+  # PostgreSQL Database
+  db_postgres:
+    image: postgres:14-alpine
+    container_name: db_postgres
+    environment:
+      POSTGRES_USER: bd_user
+      POSTGRES_PASSWORD: bd_pass
+      POSTGRES_DB: bd_db
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks:
+      - bd-net
+  
+  # ClickHouse Database
+  db_clickhouse:
+    image: clickhouse/clickhouse-server:23.3
+    container_name: db_clickhouse
+    ports:
+      - "8124:8123"  # HTTP interface for queries
+      - "9001:9000"  # Native TCP interface
+    volumes:
+      - ./ch-config/users.xml:/etc/clickhouse-server/users.xml
+      - chdata:/var/lib/clickhouse
+    networks:
+      - bd-net
+
+  # Apache Spark Master
+  spark_master:
+    image: bitnami/spark:3.4.1
+    container_name: spark_master
+    environment:
+      - SPARK_MODE=master
+      - SPARK_RPC_AUTHENTICATION_ENABLED=no
+      - SPARK_RPC_ENCRYPTION_ENABLED=no
+      - SPARK_LOCAL_STORAGE_ENCRYPTION_ENABLED=no
+      - SPARK_SSL_ENABLED=no
+    ports:
+      - "8081:8080"  # Spark Master Web UI
+      - "7078:7077"  # Spark Master communication port
+    networks:
+      - bd-net
+
+  # Apache Spark Worker
+  spark_worker:
+    image: bitnami/spark:3.4.1
+    container_name: spark_worker
+    environment:
+      - SPARK_MODE=worker
+      - SPARK_MASTER_URL=spark://spark_master:7077
+      - SPARK_WORKER_MEMORY=3G
+      - SPARK_WORKER_CORES=3
+      - SPARK_RPC_AUTHENTICATION_ENABLED=no
+      - SPARK_RPC_ENCRYPTION_ENABLED=no
+      - SPARK_LOCAL_STORAGE_ENCRYPTION_ENABLED=no
+      - SPARK_SSL_ENABLED=no
+    depends_on:
+      - spark_master
+    networks:
+      - bd-net
+
+  # Jupyter Notebook with PySpark
+  jupyter:
+    image: jupyter/pyspark-notebook:2023-10-20
+    container_name: jupyter
+    environment:
+      - SPARK_MASTER=spark://spark_master:7077
+      - JUPYTER_ENABLE_LAB=yes
+    ports:
+      - "8890:8888"  # Jupyter Notebook/Lab interface
+    volumes:
+      - ./nb:/home/jovyan/work  # Монтируем папку notebooks
+    depends_on:
+      - spark_master
+      - db_postgres
+    networks:
+      - bd-net
+
+volumes:
+  pgdata:
+  chdata:
+
+networks:
+  bd-net:
+    driver: bridge
